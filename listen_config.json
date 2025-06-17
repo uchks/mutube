@@ -1,0 +1,9 @@
+{
+  "interaction": {
+    "type": "listen",
+    "address": "0.0.0.0"
+  },
+  "teardown": "minimal",
+  "runtime": "default",
+  "code_signing": "required"
+}

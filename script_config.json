@@ -1,0 +1,9 @@
+{
+  "interaction": {
+    "type": "script",
+    "path": "../main.js"
+  },
+  "teardown": "minimal",
+  "runtime": "default",
+  "code_signing": "required"
+}

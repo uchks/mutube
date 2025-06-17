@@ -1,1 +1,5 @@
-ipa/*
+ipa/
+bin/
+.make-tmp_*
+*.ipa
+.DS_Store
