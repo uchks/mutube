@@ -1,7 +1,7 @@
 # μTube
 
-MuTube enhances YouTube on Apple TV with [TizenTube](https://github.com/reisxd/TizenTube),
-which removes ads and addds support for features like SponsorBlock.
+MuTube enhances YouTube on Apple TV with [TizenTube Cobalt](https://github.com/reisxd/TizenTubeCobalt)'s userscript,
+which removes ads and adds support for features like SponsorBlock.
 
 ## Setup
 
