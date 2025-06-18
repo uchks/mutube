@@ -5,7 +5,7 @@ which removes ads and adds support for features like SponsorBlock.
 
 ## Setup
 
-MuTube has been tested using Frida 16.7.19 and YouTube 4.50.03 on an Apple TV 4K.
+MuTube has been tested using Frida 16.6.6 and YouTube 4.50.03 on an Apple TV 4K.
 
 1. Install [insert_dylib](https://github.com/Tyilo/insert_dylib).
 
@@ -16,15 +16,12 @@ MuTube has been tested using Frida 16.7.19 and YouTube 4.50.03 on an Apple TV 4K
     cp build/Release/insert_dylib /usr/local/bin/insert_dylib
     ```
 
-2. Download and extract the `gum-graft` binary from the [Frida releases page](https://github.com/frida/frida/releases) and place it in the `bin` directory.
-
-    ```console
-    $ wget https://github.com/frida/frida/releases/download/16.7.19/gum-graft-16.7.19-macos-arm64.xz -O bin/
-    ...
-    ‘bin/gum-graft-16.7.19-macos-arm64.xz’ saved
-    $ xz -d bin/gum-graft-16.7.19-macos-arm64.xz
-    $ chmod +x bin/gum-graft-16.7.19-macos-arm64
-    ```
-
-3. Run `make`. Make sure `Makefile` points to the correct IPA and the correct `gum-graft` binary.
+2. Run `make`. Make sure `Makefile` points to the correct IPA file.
    Different versions of YouTube will require different addresses to instrument.
+   Both the Makefile and the `main.js` file need to be updated accordingly.
+
+## Usage
+
+Sideload the generated `mutube.ipa` onto your Apple TV using a tool like [Sideloadly](https://sideloadly.io/).
+Once installed, open the YouTube app and you should see a popup on the top right corner indicating that
+TizenTube has loaded successfully.
