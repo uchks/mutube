@@ -1,8 +1,15 @@
-FRIDA_VERSION := 16.7.19
+FRIDA_VERSION := 16.6.6
 YOUTUBE_IPA := ./ipa/YouTube_4.50.03_decrypted.ipa
 GUM_GRAFT := ./bin/gum-graft-$(FRIDA_VERSION)-macos-arm64
 
 all: mutube.ipa
+
+$(GUM_GRAFT):
+	@echo "Downloading gum-graft..."
+	mkdir -p ./bin
+	wget https://github.com/frida/frida/releases/download/$(FRIDA_VERSION)/gum-graft-$(FRIDA_VERSION)-macos-arm64.xz -P ./bin
+	unxz -k ./bin/gum-graft-$(FRIDA_VERSION)-macos-arm64.xz
+	chmod +x ./bin/gum-graft-$(FRIDA_VERSION)-macos-arm64
 
 mutube.ipa: $(YOUTUBE_IPA) $(GUM_GRAFT)
 	$(eval TMPDIR := $(shell mktemp -d ./.make-tmp_XXXXXXXX))
@@ -20,3 +27,6 @@ mutube.ipa: $(YOUTUBE_IPA) $(GUM_GRAFT)
 	mv $(TMPDIR)/yt-unzip/injected.ipa mutube.ipa
 
 	rm -rf $(TMPDIR)
+
+clean:
+	rm -rf ./.make-tmp_* mutube.ipa
