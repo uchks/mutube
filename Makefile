@@ -2,6 +2,7 @@ FRIDA_VERSION := 16.6.6
 YOUTUBE_IPA := ./ipa/YouTube_4.50.03_decrypted.ipa
 GUM_GRAFT := ./bin/gum-graft-$(FRIDA_VERSION)-macos-arm64
 
+.PHONY: all
 all: mutube.ipa
 
 $(GUM_GRAFT):
@@ -11,7 +12,7 @@ $(GUM_GRAFT):
 	unxz -k ./bin/gum-graft-$(FRIDA_VERSION)-macos-arm64.xz
 	chmod +x ./bin/gum-graft-$(FRIDA_VERSION)-macos-arm64
 
-mutube.ipa: $(YOUTUBE_IPA) $(GUM_GRAFT)
+mutube.ipa: $(YOUTUBE_IPA) $(GUM_GRAFT) main.js script_config.json
 	$(eval TMPDIR := $(shell mktemp -d ./.make-tmp_XXXXXXXX))
 
 	wget -q https://github.com/frida/frida/releases/download/$(FRIDA_VERSION)/frida-gadget-$(FRIDA_VERSION)-tvos-arm64.dylib.xz -O $(TMPDIR)/frida-gadget.dylib.xz
@@ -28,5 +29,6 @@ mutube.ipa: $(YOUTUBE_IPA) $(GUM_GRAFT)
 
 	rm -rf $(TMPDIR)
 
+.PHONY: clean
 clean:
 	rm -rf ./.make-tmp_* mutube.ipa
