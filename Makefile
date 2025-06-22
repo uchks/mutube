@@ -20,7 +20,7 @@ mutube.ipa: $(YOUTUBE_IPA) $(GUM_GRAFT) main.js script_config.json
 	mkdir -p $(TMPDIR)/yt-unzip
 	unzip -q $(YOUTUBE_IPA) -d $(TMPDIR)/yt-unzip
 	mv $(TMPDIR)/frida-gadget.dylib $(TMPDIR)/yt-unzip/Payload/YouTubeUnstable.app/Frameworks/FridaGadget.dylib
-	cp ./script_config.json $(TMPDIR)/yt-unzip/Payload/YouTubeUnstable.app/Frameworks/FridaGadget.config
+	cp ./script_config.json $(TMPDIR)/yt-unzip/Payload/YouTubeUnstable.app/FridaGadget.config
 	cp ./main.js $(TMPDIR)/yt-unzip/Payload/YouTubeUnstable.app/main.js
 	$(GUM_GRAFT) $(TMPDIR)/yt-unzip/Payload/YouTubeUnstable.app/YouTubeUnstable --instrument=0xed4a30 --instrument=0x152ccc8
 	insert_dylib --strip-codesig --inplace '@executable_path/Frameworks/FridaGadget.dylib' $(TMPDIR)/yt-unzip/Payload/YouTubeUnstable.app/YouTubeUnstable
