@@ -1,6 +1,25 @@
 const MODULE = "YouTubeUnstable";
 const base = Module.findBaseAddress(MODULE);
 
+function jsStringToNative(str) {
+  // convert a JavaScript string to a char* buffer
+  // make sure string is ASCII only so we don't have to deal with length issues related to UTF-8
+  const vals = [];
+  for (let i = 0; i < str.length; i++) {
+    const charCode = str.charCodeAt(i);
+    if (charCode < 0 || charCode > 255) {
+      throw new Error("Prefix contains non-ASCII character at index " + i);
+    }
+    vals.push(str.charCodeAt(i));
+  }
+
+  vals.push(0); // null terminator
+
+  const tmpBuf = Memory.alloc(vals.length);
+  Memory.writeByteArray(tmpBuf, vals);
+  return tmpBuf;
+}
+
 const insertPtr = Module.findExportByName(
   "libc++.1.dylib",
   "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6insertEmPKcm"
@@ -13,21 +32,7 @@ const insertFn = new NativeFunction(insertPtr, "pointer", [
 ]);
 
 function prepend(strPtr, prefix) {
-  // convert prefix to a ASCII string array
-  const vals = [];
-  for (let i = 0; i < prefix.length; i++) {
-    const charCode = prefix.charCodeAt(i);
-    if (charCode < 0 || charCode > 255) {
-      throw new Error("Prefix contains non-ASCII character at index " + i);
-    }
-    vals.push(prefix.charCodeAt(i));
-  }
-
-  vals.push(0); // null terminator
-
-  const tmpBuf = Memory.alloc(vals.length);
-  Memory.writeByteArray(tmpBuf, vals);
-
+  const tmpBuf = jsStringToNative(prefix);
   insertFn(strPtr, 0, tmpBuf, prefix.length);
 }
 
@@ -57,27 +62,87 @@ function readStdString(str) {
   }
 }
 
-// add a script to the page with source https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js
-// check if the script is already injected
+// unused for now, but useful for debugging by modifying existing JS.
+const replacePtr = Module.findExportByName(
+  "libc++.1.dylib",
+  "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7replaceEmmPKc"
+);
+console.log('replacePtr:', replacePtr);
+const replaceFn = new NativeFunction(replacePtr, "pointer", [
+  "pointer",  // std::string this
+  "ulong",  // size_t pos
+  "ulong",  // size_t len
+  "pointer",  // const char* s
+]);
+
+function replace(str, substr, newStr) {
+  // replace a substring in a std::string with a new string
+  // replaces the first occurrence of substr with newStr only
+  const strData = readStdString(str);
+  // find first occurrence of substr in strData.res
+  const index = strData.res.indexOf(substr);
+  if (index === -1) {
+    return false; // substring not found, nothing to replace
+  }
+
+  const tmpBuf = jsStringToNative(newStr);
+
+  console.log(`replaceFn: replacing "${substr}" at index ${index} with "${newStr}" in std::string at ${str}`);
+  replaceFn(
+    str,
+    index,  // position to start replacing
+    substr.length,  // length of the substring to replace
+    tmpBuf  // new string to insert
+  );
+  return true;
+}
+
+// Add TizenTube script to the page. Don't inject more than once.
+//
+// Restore 4k support by hooking window.MediaSource.isTypeSupported.
+// When sideloaded, isTypeSupported returns false for vp9 codecs (unless experimental=allowed is set).
+// Not quite sure why, but most likely due to lack of entitlements when sideloaded. (see https://github.com/PoomSmart/YTUHD).
+// Also unsure why but even with experimental=allowed, it returns false for vp9 with width=3840 and height=2160.
+// So we remove width= and height= from the mimeType string before calling the original isTypeSupported.
 const injectedContent = `
 (function () {
 if (document.mutube) return;
 document.mutube = true;
+
 var script = document.createElement('script');
 script.src = "https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js";
 script.async = true;
 document.head.appendChild(script);
+
+const originalIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);
+
+window.MediaSource.isTypeSupported = function(mimeType) {
+  const parts = mimeType
+    .split(';')
+    .map(part => part.trim())
+    .filter(part => part);
+
+  const filtered = parts.filter(part => {
+    const lower = part.toLowerCase();
+    return !(lower.startsWith('width=') || lower.startsWith('height='));
+  });
+
+  let cleaned = filtered.join('; ');
+  if (!/experimental=/.test(cleaned)) {
+    cleaned += '; experimental=allowed';
+  }
+  return originalIsTypeSupported(cleaned);
+};
 })();
 
 `;
 
 // HTMLScriptElement::Execute
 // https://cobalt.googlesource.com/cobalt/+/19.lts.1+/src/cobalt/dom/html_script_element.cc#593
-Interceptor.attach(base.add(0x00ed4a30), {
+Interceptor.attach(base.add(0xed4a30), {
   onEnter(args) {
     const content = args[1];
-    const str = readStdString(content);
-    if (str.length > 0 && str.res.includes("yttv")) {
+    if (readStdString(content).res.includes("yttv")) {
       prepend(content, injectedContent);
     }
   },
