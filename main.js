@@ -67,7 +67,6 @@ const replacePtr = Module.findExportByName(
   "libc++.1.dylib",
   "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7replaceEmmPKc"
 );
-console.log('replacePtr:', replacePtr);
 const replaceFn = new NativeFunction(replacePtr, "pointer", [
   "pointer",  // std::string this
   "ulong",  // size_t pos
@@ -87,7 +86,6 @@ function replace(str, substr, newStr) {
 
   const tmpBuf = jsStringToNative(newStr);
 
-  console.log(`replaceFn: replacing "${substr}" at index ${index} with "${newStr}" in std::string at ${str}`);
   replaceFn(
     str,
     index,  // position to start replacing
@@ -99,11 +97,10 @@ function replace(str, substr, newStr) {
 
 // Add TizenTube script to the page. Don't inject more than once.
 //
-// Restore 4k support by hooking window.MediaSource.isTypeSupported.
-// When sideloaded, isTypeSupported returns false for vp9 codecs (unless experimental=allowed is set).
-// Not quite sure why, but most likely due to lack of entitlements when sideloaded. (see https://github.com/PoomSmart/YTUHD).
-// Also unsure why but even with experimental=allowed, it returns false for vp9 with width=3840 and height=2160.
-// So we remove width= and height= from the mimeType string before calling the original isTypeSupported.
+// Restore 4k support by hooking window.MediaSource.isTypeSupported to remove the height/width parameters.
+// I am not actually sure why this works since isTypeSupported still returns false for VP09 codecs.
+// YouTube does detect spoofing by checking nonsensical values for height/width so maybe that affects something?
+// HDR still does not work, but at least 4k works now.
 const injectedContent = `
 (function () {
 if (document.mutube) return;
@@ -123,14 +120,10 @@ window.MediaSource.isTypeSupported = function(mimeType) {
     .filter(part => part);
 
   const filtered = parts.filter(part => {
-    const lower = part.toLowerCase();
-    return !(lower.startsWith('width=') || lower.startsWith('height='));
+    return !(part.startsWith('width=') || part.startsWith('height='));
   });
 
-  let cleaned = filtered.join('; ');
-  if (!/experimental=/.test(cleaned)) {
-    cleaned += '; experimental=allowed';
-  }
+  const cleaned = filtered.join('; ');
   return originalIsTypeSupported(cleaned);
 };
 })();
