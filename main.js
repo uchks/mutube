@@ -106,11 +106,19 @@ const injectedContent = `
 if (document.mutube) return;
 document.mutube = true;
 
+// Load TizenTube script first
 var script = document.createElement('script');
 script.src = "https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js";
 script.async = true;
 document.head.appendChild(script);
 
+// Load HLS.js for premium quality streaming
+var hlsScript = document.createElement('script');
+hlsScript.src = "https://cdn.jsdelivr.net/npm/hls.js@1";
+hlsScript.async = true;
+document.head.appendChild(hlsScript);
+
+// 4K support - remove width/height parameters from MediaSource queries
 const originalIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);
 
 window.MediaSource.isTypeSupported = function(mimeType) {
@@ -126,6 +134,301 @@ window.MediaSource.isTypeSupported = function(mimeType) {
   const cleaned = filtered.join('; ');
   return originalIsTypeSupported(cleaned);
 };
+
+// HLS Premium Quality
+const nativeJSONParse = window.JSON.parse;
+
+function getYtcfgValue(name) {
+  return window.ytcfg && window.ytcfg.get ? window.ytcfg.get(name) : undefined;
+}
+
+function getCurrentVideoId() {
+  const search = window.location.search;
+  if (search) {
+    const match = search.match(/[?&]v=([^&]+)/);
+    if (match) return match[1];
+  }
+  return (getYtcfgValue('PLAYER_VARS') && getYtcfgValue('PLAYER_VARS').video_id);
+}
+
+
+window.hlsManifestData = {
+  url: null,
+  enabled: false,
+  player: null,
+  currentVideoId: null,
+  originalSrc: null
+};
+
+
+window.JSON.parse = function() {
+  const data = nativeJSONParse.apply(this, arguments);
+  
+  if (data && typeof data === 'object') {
+    if (data.videoDetails && data.playabilityStatus) {
+      return interceptPlayerResponse(data);
+    }
+    
+    if (data.playerResponse && data.playerResponse.videoDetails && data.playerResponse.playabilityStatus) {
+      data.playerResponse = interceptPlayerResponse(data.playerResponse);
+    }
+  }
+  
+  return data;
+};
+
+function interceptPlayerResponse(originalResponse) {
+  const videoId = (originalResponse.videoDetails && originalResponse.videoDetails.videoId) || getCurrentVideoId();
+  if (!videoId || !originalResponse.streamingData) return originalResponse;
+  
+  window.hlsManifestData.currentVideoId = videoId;
+  
+  if (originalResponse.streamingData.hlsManifestUrl) {
+    window.hlsManifestData.url = originalResponse.streamingData.hlsManifestUrl;
+    window.hlsDebugInfo = 'Found native HLS manifest';
+  } else {
+    const adaptiveFormats = originalResponse.streamingData.adaptiveFormats || [];
+    const formats = originalResponse.streamingData.formats || [];
+    
+    const allFormats = [...formats, ...adaptiveFormats];
+    const videoFormats = allFormats.filter(format => 
+      format.url && format.mimeType && format.mimeType.includes('video') && 
+      (format.quality || format.qualityLabel)
+    );
+    
+    if (videoFormats.length > 0) {
+      const sortedFormats = videoFormats.sort((a, b) => {
+        const bitrateA = parseInt(a.bitrate) || 0;
+        const bitrateB = parseInt(b.bitrate) || 0;
+        if (bitrateA !== bitrateB) return bitrateB - bitrateA;
+        
+        const heightA = parseInt(a.height) || parseInt(a.qualityLabel) || 0;
+        const heightB = parseInt(b.height) || parseInt(b.qualityLabel) || 0;
+        return heightB - heightA;
+      });
+      
+      const bestFormat = sortedFormats[0];
+      const bestBitrate = parseInt(bestFormat.bitrate) || 0;
+      const bestHeight = parseInt(bestFormat.height) || parseInt(bestFormat.qualityLabel) || 0;
+      
+      const isPremium = bestHeight >= 1080 || bestBitrate >= 5000000;
+      
+      if (isPremium) {
+        window.hlsManifestData.url = bestFormat.url;
+        const bitrateInfo = bestBitrate > 0 ? ' @' + Math.round(bestBitrate/1000000) + 'Mbps' : '';
+        window.hlsDebugInfo = 'Premium: ' + (bestFormat.qualityLabel || bestFormat.quality) + bitrateInfo;
+      } else {
+        const bitrateInfo = bestBitrate > 0 ? ' @' + Math.round(bestBitrate/1000000) + 'Mbps' : '';
+        window.hlsDebugInfo = 'Standard: ' + (bestFormat.qualityLabel || bestFormat.quality) + bitrateInfo;
+      }
+    } else {
+      window.hlsDebugInfo = 'No video formats found';
+    }
+  }
+  
+  return originalResponse;
+}
+
+function enableHLSPlayback() {
+  if (!window.hlsManifestData.url) {
+    return false;
+  }
+
+  const video = document.querySelector('video');
+  if (!video) return false;
+
+  if (!window.hlsManifestData.originalSrc) {
+    window.hlsManifestData.originalSrc = video.src;
+  }
+
+  const currentTime = video.currentTime;
+  const wasPaused = video.paused;
+
+  // Check if URL is an HLS manifest (.m3u8) or a direct stream
+  if (window.hlsManifestData.url.includes('.m3u8')) {
+    if (!window.Hls || !window.Hls.isSupported()) {
+      return false;
+    }
+
+    if (window.hlsManifestData.player) {
+      window.hlsManifestData.player.destroy();
+    }
+
+    window.hlsManifestData.player = new window.Hls({
+      debug: false,
+      abrEwmaDefaultEstimate: 5000000
+    });
+
+    window.hlsManifestData.player.loadSource(window.hlsManifestData.url);
+    window.hlsManifestData.player.attachMedia(video);
+
+    window.hlsManifestData.player.on(window.Hls.Events.MANIFEST_PARSED, function() {
+      video.currentTime = currentTime;
+      if (!wasPaused) {
+        video.play();
+      }
+    });
+
+    window.hlsManifestData.player.on(window.Hls.Events.ERROR, function(event, data) {
+      if (data.fatal) {
+        disableHLSPlayback();
+        window.hlsManifestData.enabled = false;
+      }
+    });
+  } else {
+    video.addEventListener('error', function(e) {
+      window.hlsManifestData.enabled = false;
+      if (window.hlsManifestData.originalSrc) {
+        video.src = window.hlsManifestData.originalSrc;
+        video.load();
+      }
+      showYouTubeTVToast('Stream Error', 'Direct stream failed to load');
+    }, { once: true });
+    
+    video.addEventListener('loadedmetadata', function() {
+      video.currentTime = currentTime;
+      if (!wasPaused) {
+        video.play();
+      }
+    }, { once: true });
+    
+    video.src = window.hlsManifestData.url;
+    video.load();
+  }
+  
+  return true;
+}
+
+function disableHLSPlayback() {
+  const video = document.querySelector('video');
+  const currentTime = video ? video.currentTime : 0;
+  const wasPaused = video ? video.paused : true;
+
+  if (window.hlsManifestData.player) {
+    window.hlsManifestData.player.destroy();
+    window.hlsManifestData.player = null;
+  }
+
+  if (video && window.hlsManifestData.originalSrc) {
+    // Restore original source
+    video.src = window.hlsManifestData.originalSrc;
+    video.load();
+    
+    video.addEventListener('loadedmetadata', function() {
+      if (currentTime > 0) {
+        video.currentTime = currentTime;
+      }
+      if (!wasPaused) {
+        video.play();
+      }
+    }, { once: true });
+  }
+}
+
+function toggleHLS() {
+  if (window.hlsManifestData.enabled) {
+    window.hlsManifestData.enabled = false;
+    disableHLSPlayback();
+    showYouTubeTVToast('HLS Manifest Disabled', '');
+  } else {
+    if (window.hlsManifestData.url) {
+      if (enableHLSPlayback()) {
+        window.hlsManifestData.enabled = true;
+        showYouTubeTVToast('HLS Manifest Enabled', '');
+      } else {
+        showYouTubeTVToast('HLS Manifest Failed', '');
+      }
+    } else {
+      showYouTubeTVToast('No HLS Available', window.hlsDebugInfo || '');
+    }
+  }
+}
+
+// YouTube TV toast notification function
+function showYouTubeTVToast(title, subtitle) {
+  const toastCommand = {
+    openPopupAction: {
+      popupType: 'TOAST',
+      popup: {
+        overlayToastRenderer: {
+          title: { simpleText: title },
+          subtitle: { simpleText: subtitle }
+        }
+      }
+    }
+  };
+  
+  if (window._yttv) {
+    for (let key in window._yttv) {
+      if (window._yttv[key] && window._yttv[key].instance && window._yttv[key].instance.resolveCommand) {
+        window._yttv[key].instance.resolveCommand(toastCommand, {});
+        return;
+      }
+    }
+  }
+}
+
+// Wait for TizenTube to load, then integrate HLS toggle
+function waitForTizenTube() {
+  if (window._yttv) {
+    for (let key in window._yttv) {
+      if (window._yttv[key] && window._yttv[key].instance && window._yttv[key].instance.resolveCommand) {
+        const originalResolve = window._yttv[key].instance.resolveCommand;
+        
+        window._yttv[key].instance.resolveCommand = function(command, options) {
+          if (command.openPopupAction && command.openPopupAction.uniqueId === 'playback-settings') {
+            const items = command.openPopupAction.popup.overlaySectionRenderer.overlay.overlayTwoPanelRenderer.actionPanel.overlayPanelRenderer.content.overlayPanelItemListRenderer.items;
+            
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              const renderer = item.compactLinkRenderer;
+              
+              if (renderer && renderer.icon && renderer.icon.iconType === 'SLOW_MOTION_VIDEO') {
+                const hlsToggle = {
+                  compactLinkRenderer: {
+                    title: { simpleText: 'HLS Manifest' },
+                    subtitle: { simpleText: 'Extremely experimental. Broken.' },
+                    serviceEndpoint: {
+                      signalAction: {
+                        customAction: {
+                          action: 'HLS_TOGGLE'
+                        }
+                      }
+                    }
+                  }
+                };
+                
+                items.splice(i + 1, 0, hlsToggle);
+                break;
+              }
+            }
+          }
+          
+          if (command.signalAction && command.signalAction.customAction && command.signalAction.customAction.action === 'HLS_TOGGLE') {
+            toggleHLS();
+            return null;
+          }
+          
+          return originalResolve.call(this, command, options);
+        };
+        
+        // Show ready message
+        setTimeout(function() {
+          showYouTubeTVToast('HLS Manifest Ready', 'Toggle in player settings menu');
+        }, 3000);
+        
+        return;
+      }
+    }
+  }
+  
+  // Retry if TizenTube not ready
+  setTimeout(waitForTizenTube, 2000);
+}
+
+// Start waiting for TizenTube
+setTimeout(waitForTizenTube, 5000);
+
 })();
 
 `;
@@ -147,7 +450,7 @@ Interceptor.attach(base.add(0x152ccc8), {
   onEnter(args) {
     prepend(
       args[2],
-      "sponsorblock.inf.re sponsor.ajay.app dearrow-thumb.ajay.app cdn.jsdelivr.net "
+      "sponsorblock.inf.re sponsor.ajay.app dearrow-thumb.ajay.app cdn.jsdelivr.net www.youtube.com youtube.com googlevideo.com *.googlevideo.com ytimg.com *.ytimg.com "
     );
   },
 });
